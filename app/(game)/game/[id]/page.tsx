@@ -1,0 +1,349 @@
+'use client'
+
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter, useParams } from 'next/navigation'
+import Board from '@/components/Board'
+import MissionModal from '@/components/MissionModal'
+import MissionLog from '@/components/MissionLog'
+import WinOverlay from '@/components/WinOverlay'
+import PlayerCard from '@/components/PlayerCard'
+import LanguageToggle from '@/components/LanguageToggle'
+import { useGamePolling, type GameStateData } from '@/lib/useGamePolling'
+
+export default function GamePage() {
+  const router = useRouter()
+  const params = useParams()
+  const gameId = params.id as string
+
+  const [myUserId, setMyUserId] = useState<string | null>(null)
+  const [lang, setLang] = useState<'EN' | 'ZH'>('EN')
+  const [placing, setPlacing] = useState(false)
+  const [rematchLoading, setRematchLoading] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const redirectedRef = useRef(false)
+
+  const { gameState, refresh } = useGamePolling(gameId)
+
+  // Fetch session once
+  useEffect(() => {
+    fetch('/api/auth/me').then(async (res) => {
+      const data = await res.json()
+      if (!data.user) {
+        router.push('/login')
+        return
+      }
+      setMyUserId(data.user.id)
+      setLang(data.user.preferredLanguage as 'EN' | 'ZH')
+    })
+  }, [router])
+
+  // Redirect to next game room when rematch is available
+  useEffect(() => {
+    if (gameState?.nextGame && !redirectedRef.current) {
+      redirectedRef.current = true
+      router.push(`/room/${gameState.nextGame.roomCode}`)
+    }
+  }, [gameState?.nextGame, router])
+
+  const t = (en: string, zh: string) => (lang === 'ZH' ? zh : en)
+
+  async function handlePlace(row: number, col: number) {
+    if (!gameState || placing || gameState.status !== 'ACTIVE') return
+    if (gameState.pendingMissionData) return
+    if (gameState.currentTurnPlayerId !== myUserId) return
+    setPlacing(true)
+    try {
+      await fetch(`/api/game/${gameId}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row, col }),
+      })
+      await refresh()
+    } finally {
+      setPlacing(false)
+    }
+  }
+
+  async function handleAckMission() {
+    try {
+      await fetch(`/api/game/${gameId}/mission/ack`, { method: 'POST' })
+      await refresh()
+    } catch {
+      // silent
+    }
+  }
+
+  async function handleRematch() {
+    setRematchLoading(true)
+    try {
+      const res = await fetch(`/api/game/${gameId}/rematch`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok && data.roomCode) {
+        router.push(`/room/${data.roomCode}`)
+      } else {
+        setRematchLoading(false)
+      }
+    } catch {
+      setRematchLoading(false)
+    }
+  }
+
+  async function handleBackToLobby() {
+    router.push('/lobby')
+  }
+
+  if (!gameState || !myUserId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FFFACD]">
+        <div className="text-gray-400">{t('Loading game...', '加载游戏...')}</div>
+      </div>
+    )
+  }
+
+  const { player1, player2, currentTurn, currentTurnPlayerId, boardState, winningStones,
+    pendingMissionData, missionLogs, status, winner } = gameState
+
+  if (!player1 || !player2) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FFFACD]">
+        <div className="text-gray-400">{t('Waiting for players...', '等待玩家加入...')}</div>
+      </div>
+    )
+  }
+
+  const myPlayerNum: 1 | 2 | null =
+    player1.id === myUserId ? 1 : player2.id === myUserId ? 2 : null
+  const isMyTurn = currentTurnPlayerId === myUserId && status === 'ACTIVE' && !pendingMissionData
+  const isFinished = status === 'FINISHED'
+  const isBoardDisabled = !isMyTurn || placing
+
+  const missionIsForMe = pendingMissionData?.assignedToPlayerId === myUserId
+  const waitingForMissionAck = !!pendingMissionData && !missionIsForMe
+
+  const missionAssignedLang: 'EN' | 'ZH' =
+    pendingMissionData?.assignedToPlayerId === player1.id
+      ? (player1.preferredLanguage as 'EN' | 'ZH')
+      : (player2.preferredLanguage as 'EN' | 'ZH')
+
+  // Info panel content (shared between sidebar and bottom sheet)
+  function InfoPanel() {
+    return (
+      <>
+        {/* Turn indicator */}
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="text-xs text-gray-400 uppercase tracking-wide mb-3">
+            {t('Current Turn', '当前回合')} · {t('Move', '第')} {gameState!.moveCount + 1}
+          </div>
+          <div className="space-y-2">
+            {([player1, player2] as const).map((p, i) => {
+              const pNum = i + 1
+              const isActive = currentTurn === pNum && !isFinished && !pendingMissionData
+              const stoneColor = pNum === 1 ? 'bg-[#FFAEB9]' : 'bg-[#A2CD5A]'
+              return (
+                <div
+                  key={p.id}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+                    isActive ? 'bg-gray-50 ring-2 ring-gray-200' : 'opacity-50'
+                  }`}
+                >
+                  <div className={`w-5 h-5 rounded-full ${stoneColor} flex-shrink-0 ${isActive ? 'animate-pulse2' : ''}`} />
+                  <span className={`font-semibold text-sm ${isActive ? 'text-gray-800' : 'text-gray-400'}`}>
+                    {p.username}
+                    {p.id === myUserId && <span className="text-gray-400 font-normal ml-1">({t('You', '你')})</span>}
+                  </span>
+                  {isActive && !pendingMissionData && (
+                    <span className="ml-auto text-xs text-[#1E90FF] font-medium">
+                      {p.id === myUserId ? t('Your turn', '你的回合') : t("Opponent's turn", '对方回合')}
+                    </span>
+                  )}
+                  {pendingMissionData && (
+                    <span className="ml-auto text-xs text-[#836FFF] font-medium">
+                      {t('Mission...', '任务...')}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {waitingForMissionAck && (
+            <div className="mt-3 text-xs text-[#836FFF] bg-purple-50 rounded-lg px-3 py-2 text-center">
+              {t(`Waiting for ${pendingMissionData!.assignedToPlayerName} to accept mission...`,
+                 `等待 ${pendingMissionData!.assignedToPlayerName} 确认任务...`)}
+            </div>
+          )}
+        </div>
+
+        {/* Player cards */}
+        <PlayerCard
+          username={player1.username}
+          phone={player1.phone}
+          gamesPlayed={player1.gamesPlayed}
+          wins={player1.wins}
+          preferredLanguage={player1.preferredLanguage as 'EN' | 'ZH'}
+          playerNumber={1}
+          isActive={myPlayerNum === 1}
+          label={t('Player 1 (Pink)', '玩家1（粉色）')}
+        />
+        <PlayerCard
+          username={player2.username}
+          phone={player2.phone}
+          gamesPlayed={player2.gamesPlayed}
+          wins={player2.wins}
+          preferredLanguage={player2.preferredLanguage as 'EN' | 'ZH'}
+          playerNumber={2}
+          isActive={myPlayerNum === 2}
+          label={t('Player 2 (Green)', '玩家2（绿色）')}
+        />
+
+        {/* Mission Log */}
+        <MissionLog missions={missionLogs} lang={lang} />
+      </>
+    )
+  }
+
+  const currentOpponentName = currentTurnPlayerId === player1.id ? player1.username : player2.username
+
+  return (
+    <div className="min-h-screen bg-[#FFFACD] flex flex-col">
+      {/* Header */}
+      <header className="flex items-center justify-between px-4 py-3 bg-white/60 backdrop-blur-sm border-b border-gray-100">
+        <button
+          onClick={() => router.push('/lobby')}
+          className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+          {t('Lobby', '大厅')}
+        </button>
+        <h1 className="text-lg font-bold text-gray-700">GoClick</h1>
+        <LanguageToggle lang={lang} userId={myUserId} onToggle={setLang} />
+      </header>
+
+      {/* Desktop layout */}
+      <main className="flex-1 flex flex-col md:flex-row gap-4 p-4 pb-20 md:pb-4 max-w-6xl mx-auto w-full">
+        {/* Board */}
+        <div className="flex-1 flex flex-col items-center justify-start gap-2">
+          <div className="w-full" style={{ maxWidth: 'min(calc(100vw - 32px), 540px)' }}>
+            {/* Board waiting overlay wrapper */}
+            <div className="relative">
+              <Board
+                board={boardState}
+                winningStones={winningStones}
+                onPlace={handlePlace}
+                currentPlayer={(myPlayerNum ?? currentTurn) as 1 | 2}
+                disabled={isBoardDisabled}
+              />
+              {/* Waiting overlay */}
+              {!isMyTurn && !isFinished && !pendingMissionData && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-lg pointer-events-none">
+                  <div className="bg-black/30 backdrop-blur-sm rounded-xl px-4 py-2 text-white text-sm font-medium">
+                    {t(`Waiting for ${currentOpponentName}...`, `等待 ${currentOpponentName} 落子...`)}
+                  </div>
+                </div>
+              )}
+              {waitingForMissionAck && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-lg pointer-events-none">
+                  <div className="bg-[#836FFF]/30 backdrop-blur-sm rounded-xl px-4 py-2 text-white text-sm font-medium">
+                    {t(`Waiting for ${pendingMissionData!.assignedToPlayerName} to accept mission...`,
+                       `等待 ${pendingMissionData!.assignedToPlayerName} 确认任务...`)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop info panel */}
+        <div className="hidden md:flex w-72 flex-col gap-4">
+          <InfoPanel />
+        </div>
+      </main>
+
+      {/* Mobile bottom sheet */}
+      <div
+        className="fixed md:hidden bottom-0 left-0 right-0 z-20 bg-white rounded-t-2xl shadow-2xl transition-transform duration-300"
+        style={{ transform: sheetOpen ? 'translateY(0)' : 'translateY(calc(100% - 56px))' }}
+      >
+        <button
+          onClick={() => setSheetOpen((s) => !s)}
+          className="w-full h-14 flex items-center gap-3 px-4 border-b border-gray-100"
+        >
+          <div className="w-10 h-1 rounded-full bg-gray-200 mx-auto absolute left-1/2 top-3 -translate-x-1/2" />
+          <div className="flex items-center gap-2 flex-1 pt-1">
+            <div className={`w-3 h-3 rounded-full ${myPlayerNum === 1 ? 'bg-[#FFAEB9]' : 'bg-[#A2CD5A]'}`} />
+            <span className="text-sm text-gray-600 truncate">
+              {isMyTurn
+                ? t('Your turn to play', '轮到你落子')
+                : pendingMissionData
+                ? t('Mission in progress...', '任务进行中...')
+                : t(`Waiting for ${currentOpponentName}`, `等待 ${currentOpponentName}`)}
+            </span>
+          </div>
+          <svg
+            className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${sheetOpen ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <div className="px-4 pb-8 pt-2 space-y-4 max-h-[60vh] overflow-y-auto">
+          <InfoPanel />
+        </div>
+      </div>
+
+      {/* Mission Modal — full screen on mobile, centered on desktop */}
+      {missionIsForMe && pendingMissionData && (
+        <div
+          className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 animate-fadeIn"
+          style={{ backdropFilter: 'blur(6px)', background: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="bg-white rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-md p-8">
+            <div className="text-center mb-6">
+              <div className="inline-block bg-[#836FFF] text-white text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">
+                Mission Triggered! 任务触发！
+              </div>
+              <div className="text-sm text-gray-500">
+                {t('Assigned to', '分配给')}: <span className="font-bold text-[#836FFF]">{pendingMissionData.assignedToPlayerName}</span>
+              </div>
+            </div>
+            <div className="flex items-start gap-4 mb-6">
+              <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#836FFF] text-white flex items-center justify-center font-bold text-lg">
+                #{pendingMissionData.missionId}
+              </div>
+              <div>
+                <div className="font-bold text-gray-900 text-xl mb-2">
+                  {missionAssignedLang === 'ZH' ? pendingMissionData.missionTitleZH : pendingMissionData.missionTitleEN}
+                </div>
+                <p className="text-gray-600 leading-relaxed">
+                  {missionAssignedLang === 'ZH' ? pendingMissionData.missionTextZH : pendingMissionData.missionTextEN}
+                </p>
+                <p className="text-gray-400 text-sm mt-2 leading-relaxed">
+                  {missionAssignedLang === 'ZH' ? pendingMissionData.missionTextEN : pendingMissionData.missionTextZH}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleAckMission}
+              className="w-full py-3 rounded-xl font-bold text-white text-lg transition-all hover:opacity-90 active:scale-95"
+              style={{ background: 'linear-gradient(135deg, #836FFF, #6A5ACD)' }}
+            >
+              Got it! / 明白了！
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Win Overlay */}
+      {isFinished && winner && !missionIsForMe && (
+        <WinOverlay
+          winnerName={winner.username}
+          lang={lang}
+          onPlayAgain={handleRematch}
+          onBackToLobby={handleBackToLobby}
+          isLoading={rematchLoading}
+        />
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String        @id @default(cuid())
+  phone             String        @unique
+  passwordHash      String
+  username          String
+  preferredLanguage String        @default("EN")
+  createdAt         DateTime      @default(now())
+  gamesPlayed       Int           @default(0)
+  wins              Int           @default(0)
+
+  gamesAsPlayer1    GameSession[] @relation("Player1Games")
+  gamesAsPlayer2    GameSession[] @relation("Player2Games")
+  wonGames          GameSession[] @relation("WonGames")
+  missions          MissionLog[]  @relation("AssignedMissions")
+}
+
+model GameSession {
+  id                 String       @id @default(cuid())
+  roomCode           String       @unique
+  player1Id          String
+  player2Id          String?
+  player1Ready       Boolean      @default(false)
+  player2Ready       Boolean      @default(false)
+  currentTurn        Int          @default(1)
+  status             String       @default("WAITING_FOR_PLAYER")
+  winnerId           String?
+  boardState         String       @default("[]")
+  moveHistory        String       @default("[]")
+  triggeredMissions  String       @default("[]")
+  pendingMissionData String?
+  winningStones      String       @default("[]")
+  nextGameId         String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  player1            User         @relation("Player1Games", fields: [player1Id], references: [id])
+  player2            User?        @relation("Player2Games", fields: [player2Id], references: [id])
+  winner             User?        @relation("WonGames", fields: [winnerId], references: [id])
+  missionLogs        MissionLog[]
+}
+
+model MissionLog {
+  id                 String      @id @default(cuid())
+  gameSessionId      String
+  missionId          Int
+  missionText        String
+  assignedToPlayerId String
+  triggeredAtMove    Int
+  createdAt          DateTime    @default(now())
+
+  gameSession        GameSession @relation(fields: [gameSessionId], references: [id])
+  assignedToPlayer   User        @relation("AssignedMissions", fields: [assignedToPlayerId], references: [id])
+}
