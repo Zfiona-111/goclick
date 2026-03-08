@@ -136,6 +136,7 @@ export default function GamePage() {
           </div>
           <div className="space-y-2">
             {([player1, player2] as const).map((p, i) => {
+              if (!p) return null
               const pNum = i + 1
               const isActive = currentTurn === pNum && !isFinished && !pendingMissionData
               const stoneColor = pNum === 1 ? 'bg-[#FFAEB9]' : 'bg-[#A2CD5A]'
