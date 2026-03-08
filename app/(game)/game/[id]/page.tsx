@@ -24,7 +24,7 @@ export default function GamePage() {
   const redirectedRef = useRef(false)
   const joinedRef = useRef(false)
 
-  const { gameState, refresh } = useGamePolling(gameId)
+  const { gameState, setGameState, refresh } = useGamePolling(gameId)
 
   // Fetch session once
   useEffect(() => {
@@ -76,25 +76,62 @@ export default function GamePage() {
     if (!gameState || placing || gameState.status !== 'ACTIVE') return
     if (gameState.pendingMissionData) return
     if (gameState.currentTurnPlayerId !== myUserId) return
+
+    const placingPlayer = gameState.currentTurn
+
+    // Optimistic: show stone instantly before network
+    setGameState(prev => {
+      if (!prev) return prev
+      const newBoard = prev.boardState.map(r => [...r])
+      newBoard[row][col] = placingPlayer
+      return { ...prev, boardState: newBoard }
+    })
+
     setPlacing(true)
     try {
-      await fetch(`/api/game/${gameId}/move`, {
+      const res = await fetch(`/api/game/${gameId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ row, col }),
       })
-      await refresh()
+      if (!res.ok) {
+        await refresh() // rollback on error
+        return
+      }
+      const data = await res.json()
+      // Apply server response directly — no second round trip
+      setGameState(prev => {
+        if (!prev) return prev
+        if (data.status === 'FINISHED') {
+          return { ...prev, status: 'FINISHED', winnerId: data.winnerId, winningStones: data.winningStones ?? [], moveCount: data.moveCount }
+        }
+        const nextTurnPlayerId = data.currentTurn === 1 ? prev.player1?.id ?? null : prev.player2?.id ?? null
+        return {
+          ...prev,
+          currentTurn: data.currentTurn,
+          currentTurnPlayerId: nextTurnPlayerId,
+          pendingMissionData: data.pendingMissionData ?? null,
+          moveCount: data.moveCount,
+        }
+      })
     } finally {
       setPlacing(false)
     }
   }
 
   async function handleAckMission() {
+    if (!gameState) return
+    const nextTurn = gameState.currentTurn === 1 ? 2 : 1
+    const nextTurnPlayerId = nextTurn === 1 ? gameState.player1?.id ?? null : gameState.player2?.id ?? null
+    // Optimistic: close mission modal instantly
+    setGameState(prev => {
+      if (!prev) return prev
+      return { ...prev, pendingMissionData: null, currentTurn: nextTurn, currentTurnPlayerId: nextTurnPlayerId }
+    })
     try {
       await fetch(`/api/game/${gameId}/mission/ack`, { method: 'POST' })
-      await refresh()
     } catch {
-      // silent
+      await refresh() // rollback on error
     }
   }
 

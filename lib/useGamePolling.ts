@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 export interface PlayerData {
   id: string
   username: string
-  phone: string
+  phone?: string | null
   preferredLanguage: string
   gamesPlayed: number
   wins: number
@@ -80,5 +80,5 @@ export function useGamePolling(gameId: string | null, intervalMs = 1500) {
     }
   }, [gameId, intervalMs, fetchState])
 
-  return { gameState, refresh: fetchState, error }
+  return { gameState, setGameState, refresh: fetchState, error }
 }
