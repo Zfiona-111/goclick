@@ -56,15 +56,18 @@ export function useGamePolling(gameId: string | null, intervalMs = 1500) {
   const [gameState, setGameState] = useState<GameStateData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const lockedRef = useRef(false)
 
   const fetchState = useCallback(async () => {
-    if (!gameId) return
+    if (!gameId || lockedRef.current) return
     try {
       const res = await fetch(`/api/game/${gameId}/state`, { cache: 'no-store' })
       if (res.ok) {
         const data = await res.json()
-        setGameState(data)
-        setError(null)
+        if (!lockedRef.current) {
+          setGameState(data)
+          setError(null)
+        }
       }
     } catch {
       setError('Connection error')
@@ -80,5 +83,8 @@ export function useGamePolling(gameId: string | null, intervalMs = 1500) {
     }
   }, [gameId, intervalMs, fetchState])
 
-  return { gameState, setGameState, refresh: fetchState, error }
+  const lockPolling = useCallback(() => { lockedRef.current = true }, [])
+  const unlockPolling = useCallback(() => { lockedRef.current = false }, [])
+
+  return { gameState, setGameState, refresh: fetchState, lockPolling, unlockPolling, error }
 }

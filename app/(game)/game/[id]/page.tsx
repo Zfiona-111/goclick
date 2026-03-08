@@ -24,7 +24,7 @@ export default function GamePage() {
   const redirectedRef = useRef(false)
   const joinedRef = useRef(false)
 
-  const { gameState, setGameState, refresh } = useGamePolling(gameId)
+  const { gameState, setGameState, refresh, lockPolling, unlockPolling } = useGamePolling(gameId)
 
   // Fetch session once
   useEffect(() => {
@@ -79,6 +79,8 @@ export default function GamePage() {
 
     const placingPlayer = gameState.currentTurn
 
+    // Lock polling so stale server responses don't overwrite optimistic state
+    lockPolling()
     // Optimistic: show stone instantly before network
     setGameState(prev => {
       if (!prev) return prev
@@ -95,6 +97,7 @@ export default function GamePage() {
         body: JSON.stringify({ row, col }),
       })
       if (!res.ok) {
+        unlockPolling()
         await refresh() // rollback on error
         return
       }
@@ -116,6 +119,7 @@ export default function GamePage() {
       })
     } finally {
       setPlacing(false)
+      unlockPolling()
     }
   }
 
@@ -123,6 +127,7 @@ export default function GamePage() {
     if (!gameState) return
     const nextTurn = gameState.currentTurn === 1 ? 2 : 1
     const nextTurnPlayerId = nextTurn === 1 ? gameState.player1?.id ?? null : gameState.player2?.id ?? null
+    lockPolling()
     // Optimistic: close mission modal instantly
     setGameState(prev => {
       if (!prev) return prev
@@ -132,6 +137,8 @@ export default function GamePage() {
       await fetch(`/api/game/${gameId}/mission/ack`, { method: 'POST' })
     } catch {
       await refresh() // rollback on error
+    } finally {
+      unlockPolling()
     }
   }
 
