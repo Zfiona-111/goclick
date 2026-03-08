@@ -47,8 +47,8 @@ export default function LobbyPage() {
     try {
       const res = await fetch('/api/room/create', { method: 'POST' })
       const data = await res.json()
-      if (res.ok && data.roomCode) {
-        router.push(`/room/${data.roomCode}`)
+      if (res.ok && data.gameId) {
+        router.push(`/game/${data.gameId}`)
       }
     } catch {
       setCreating(false)

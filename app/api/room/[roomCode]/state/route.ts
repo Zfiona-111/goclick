@@ -26,6 +26,9 @@ export async function GET(
       player2: game.player2,
       player1Ready: game.player1Ready,
       player2Ready: game.player2Ready,
+      boardPreview: true,
+      player1StoneColor: '#FFAEB9',
+      player2StoneColor: '#A2CD5A',
     })
   } catch (e) {
     console.error(e)

@@ -3,12 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Board from '@/components/Board'
-import MissionModal from '@/components/MissionModal'
 import MissionLog from '@/components/MissionLog'
 import WinOverlay from '@/components/WinOverlay'
 import PlayerCard from '@/components/PlayerCard'
 import LanguageToggle from '@/components/LanguageToggle'
-import { useGamePolling, type GameStateData } from '@/lib/useGamePolling'
+import { useGamePolling } from '@/lib/useGamePolling'
 
 export default function GamePage() {
   const router = useRouter()
@@ -20,7 +19,10 @@ export default function GamePage() {
   const [placing, setPlacing] = useState(false)
   const [rematchLoading, setRematchLoading] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [myReady, setMyReady] = useState(false)
+  const [copied, setCopied] = useState(false)
   const redirectedRef = useRef(false)
+  const joinedRef = useRef(false)
 
   const { gameState, refresh } = useGamePolling(gameId)
 
@@ -37,11 +39,34 @@ export default function GamePage() {
     })
   }, [router])
 
-  // Redirect to next game room when rematch is available
+  // Auto-join if not in the room yet
+  useEffect(() => {
+    if (!gameState || !myUserId || joinedRef.current) return
+    const isInGame = gameState.player1?.id === myUserId || gameState.player2?.id === myUserId
+    if (isInGame) { joinedRef.current = true; return }
+    if (gameState.status === 'WAITING_FOR_PLAYER' || gameState.status === 'WAITING_READY') {
+      joinedRef.current = true
+      fetch(`/api/room/${gameState.roomCode}/join`, { method: 'POST' })
+        .then(() => refresh())
+        .catch(() => {})
+    }
+  }, [gameState, myUserId, refresh])
+
+  // Sync myReady from gameState
+  useEffect(() => {
+    if (!gameState || !myUserId) return
+    const isP1 = gameState.player1?.id === myUserId
+    const isP2 = gameState.player2?.id === myUserId
+    if ((isP1 && gameState.player1Ready) || (isP2 && gameState.player2Ready)) {
+      setMyReady(true)
+    }
+  }, [gameState, myUserId])
+
+  // Redirect to next game when rematch is available
   useEffect(() => {
     if (gameState?.nextGame && !redirectedRef.current) {
       redirectedRef.current = true
-      router.push(`/room/${gameState.nextGame.roomCode}`)
+      router.push(`/game/${gameState.nextGame.id}`)
     }
   }, [gameState?.nextGame, router])
 
@@ -78,8 +103,8 @@ export default function GamePage() {
     try {
       const res = await fetch(`/api/game/${gameId}/rematch`, { method: 'POST' })
       const data = await res.json()
-      if (res.ok && data.roomCode) {
-        router.push(`/room/${data.roomCode}`)
+      if (res.ok && data.gameId) {
+        router.push(`/game/${data.gameId}`)
       } else {
         setRematchLoading(false)
       }
@@ -88,10 +113,28 @@ export default function GamePage() {
     }
   }
 
-  async function handleBackToLobby() {
-    router.push('/lobby')
+  async function handleReady() {
+    if (!gameState || myReady) return
+    setMyReady(true)
+    try {
+      await fetch(`/api/room/${gameState.roomCode}/ready`, { method: 'POST' })
+      await refresh()
+    } catch {
+      setMyReady(false)
+    }
   }
 
+  async function handleCopy() {
+    if (!gameState) return
+    const shareUrl = `${window.location.origin}/room/${gameState.roomCode}`
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* fallback */ }
+  }
+
+  // --- Loading ---
   if (!gameState || !myUserId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FFFACD]">
@@ -100,6 +143,142 @@ export default function GamePage() {
     )
   }
 
+  // --- Waiting state (before both players ready) ---
+  const isWaiting = gameState.status === 'WAITING_FOR_PLAYER' || gameState.status === 'WAITING_READY'
+
+  if (isWaiting) {
+    const { player1, player2, boardState, roomCode } = gameState
+    const bothPresent = !!(player1 && player2)
+    const isP1 = player1?.id === myUserId
+    const isP2 = player2?.id === myUserId
+    const amIReady = (isP1 && gameState.player1Ready) || (isP2 && gameState.player2Ready) || myReady
+    const myPlayerNum = isP1 ? 1 : isP2 ? 2 : null
+    const myStoneColor = myPlayerNum === 1 ? '#FFAEB9' : myPlayerNum === 2 ? '#A2CD5A' : null
+    const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${roomCode}` : `/room/${roomCode}`
+
+    return (
+      <div className="min-h-screen bg-[#FFFACD] flex flex-col">
+        <header className="flex items-center justify-between px-4 py-3 bg-white/60 backdrop-blur-sm border-b border-gray-100">
+          <button onClick={() => router.push('/lobby')} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            {t('Lobby', '大厅')}
+          </button>
+          <h1 className="text-lg font-bold text-gray-700">GoClick</h1>
+          <LanguageToggle lang={lang} userId={myUserId} onToggle={setLang} />
+        </header>
+
+        <main className="flex-1 flex flex-col items-center justify-start p-4 gap-0">
+          {/* Board in background with white overlay */}
+          <div className="relative w-full" style={{ maxWidth: 'min(calc(100vw - 32px), 480px)' }}>
+            <div className="pointer-events-none">
+              <Board board={boardState} winningStones={[]} onPlace={() => {}} currentPlayer={1} disabled={true} />
+            </div>
+            {/* Semi-transparent overlay */}
+            <div className="absolute inset-0 bg-white/60 rounded-lg" />
+            {/* Centered card */}
+            <div className="absolute inset-0 flex items-center justify-center p-3">
+              <div className="bg-white/95 backdrop-blur rounded-3xl shadow-xl p-5 w-full">
+                {/* Room code */}
+                <div className="text-center mb-4">
+                  <div className="text-xs text-gray-400 uppercase tracking-widest mb-1">{t('Room Code', '房间码')}</div>
+                  <div className="text-2xl font-black text-gray-800 tracking-widest font-mono">{roomCode}</div>
+                </div>
+
+                {/* Share link */}
+                <div className="flex items-center gap-2 mb-4 bg-gray-50 rounded-xl px-3 py-2">
+                  <span className="flex-1 text-xs text-gray-500 truncate font-mono">{shareUrl}</span>
+                  <button
+                    onClick={handleCopy}
+                    className="flex-shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg text-white transition-all active:scale-95"
+                    style={{ background: copied ? '#22c55e' : 'linear-gradient(135deg, #836FFF, #6A5ACD)' }}
+                  >
+                    {copied ? t('Copied!', '已复制！') : t('Copy', '复制')}
+                  </button>
+                </div>
+
+                {/* Player slots */}
+                <div className="flex gap-2 mb-4">
+                  {/* Player 1 */}
+                  <div className={`flex-1 rounded-2xl p-3 border-2 transition-all ${player1?.id === myUserId ? 'border-[#1E90FF] bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="text-xs text-gray-400 mb-2">{t('Player 1', '玩家1')}</div>
+                    {player1 ? (
+                      <>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <div className="w-3.5 h-3.5 rounded-full bg-[#FFAEB9] flex-shrink-0" />
+                          <span className="text-xs font-bold text-gray-800 truncate">{player1.username}</span>
+                        </div>
+                        <div className={`text-xs text-center py-1 rounded-lg ${gameState.player1Ready ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                          {gameState.player1Ready ? '✓ Ready' : t('Waiting...', '等待中...')}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-3.5 h-3.5 rounded-full border-2 border-dashed border-[#FFAEB9] animate-pulse" />
+                        <span className="text-xs text-gray-400">{t('Waiting...', '等待中...')}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Player 2 */}
+                  <div className={`flex-1 rounded-2xl p-3 border-2 transition-all ${player2?.id === myUserId ? 'border-[#1E90FF] bg-blue-50' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="text-xs text-gray-400 mb-2">{t('Player 2', '玩家2')}</div>
+                    {player2 ? (
+                      <>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <div className="w-3.5 h-3.5 rounded-full bg-[#A2CD5A] flex-shrink-0" />
+                          <span className="text-xs font-bold text-gray-800 truncate">{player2.username}</span>
+                        </div>
+                        <div className={`text-xs text-center py-1 rounded-lg ${gameState.player2Ready ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                          {gameState.player2Ready ? '✓ Ready' : t('Waiting...', '等待中...')}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-3.5 h-3.5 rounded-full border-2 border-dashed border-[#A2CD5A] animate-pulse" />
+                        <span className="text-xs text-gray-400">{t('Waiting to join...', '等待加入...')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Let's GO button */}
+                {bothPresent ? (
+                  <button
+                    onClick={handleReady}
+                    disabled={amIReady}
+                    className="w-full py-4 rounded-full font-bold text-xl transition-all active:scale-95"
+                    style={{
+                      background: amIReady ? '#e5e7eb' : 'linear-gradient(135deg, #1E90FF, #1874CD)',
+                      color: amIReady ? '#9ca3af' : 'white',
+                      cursor: amIReady ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {amIReady ? t("✓ Ready! Waiting...", "✓ 已准备！等待对方...") : "Let's GO!"}
+                  </button>
+                ) : (
+                  <div className="text-center text-sm text-gray-400 py-3 animate-pulse">
+                    {t('Waiting for opponent to join...', '等待对手加入...')}
+                  </div>
+                )}
+
+                {/* Stone color hint */}
+                {myStoneColor && (
+                  <div className="mt-3 text-center text-xs text-gray-400 flex items-center justify-center gap-1.5">
+                    <span>{t('Your stone:', '你的棋子：')}</span>
+                    <div className="w-3 h-3 rounded-full border border-gray-200" style={{ background: myStoneColor }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  // --- Active / Finished game ---
   const { player1, player2, currentTurn, currentTurnPlayerId, boardState, winningStones,
     pendingMissionData, missionLogs, status, winner } = gameState
 
@@ -125,7 +304,6 @@ export default function GamePage() {
       ? (player1.preferredLanguage as 'EN' | 'ZH')
       : (player2.preferredLanguage as 'EN' | 'ZH')
 
-  // Info panel content (shared between sidebar and bottom sheet)
   function InfoPanel() {
     const p1 = player1!
     const p2 = player2!
@@ -227,7 +405,6 @@ export default function GamePage() {
         {/* Board */}
         <div className="flex-1 flex flex-col items-center justify-start gap-2">
           <div className="w-full" style={{ maxWidth: 'min(calc(100vw - 32px), 540px)' }}>
-            {/* Board waiting overlay wrapper */}
             <div className="relative">
               <Board
                 board={boardState}
@@ -294,7 +471,7 @@ export default function GamePage() {
         </div>
       </div>
 
-      {/* Mission Modal — full screen on mobile, centered on desktop */}
+      {/* Mission Modal */}
       {missionIsForMe && pendingMissionData && (
         <div
           className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 animate-fadeIn"
@@ -342,7 +519,7 @@ export default function GamePage() {
           winnerName={winner.username}
           lang={lang}
           onPlayAgain={handleRematch}
-          onBackToLobby={handleBackToLobby}
+          onBackToLobby={() => router.push('/lobby')}
           isLoading={rematchLoading}
         />
       )}

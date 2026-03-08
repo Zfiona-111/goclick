@@ -10,8 +10,8 @@ datasource db {
 model User {
   id                String        @id @default(cuid())
   phone             String        @unique
-  passwordHash      String
   username          String
+  isNewUser         Boolean       @default(false)
   preferredLanguage String        @default("EN")
   createdAt         DateTime      @default(now())
   gamesPlayed       Int           @default(0)
@@ -21,6 +21,15 @@ model User {
   gamesAsPlayer2    GameSession[] @relation("Player2Games")
   wonGames          GameSession[] @relation("WonGames")
   missions          MissionLog[]  @relation("AssignedMissions")
+}
+
+model OtpRecord {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
 }
 
 model GameSession {
