@@ -9,8 +9,8 @@ datasource db {
 
 model User {
   id                String        @id @default(cuid())
-  phone             String        @unique
-  username          String
+  phone             String?
+  username          String        @unique
   isNewUser         Boolean       @default(false)
   preferredLanguage String        @default("EN")
   createdAt         DateTime      @default(now())

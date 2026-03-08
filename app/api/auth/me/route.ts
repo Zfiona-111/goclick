@@ -15,7 +15,6 @@ export async function GET() {
     const userData = {
       id: user.id,
       username: user.username,
-      phone: user.phone,
       preferredLanguage: user.preferredLanguage,
       gamesPlayed: user.gamesPlayed,
       wins: user.wins,

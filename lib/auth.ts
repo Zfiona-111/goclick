@@ -4,7 +4,6 @@ import { cookies } from 'next/headers'
 export interface SessionUser {
   id: string
   username: string
-  phone: string
   preferredLanguage: 'EN' | 'ZH'
 }
 

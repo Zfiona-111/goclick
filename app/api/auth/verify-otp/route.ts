@@ -44,12 +44,15 @@ export async function POST(req: NextRequest) {
     await prisma.otpRecord.delete({ where: { id: otp.id } })
 
     // Find or create user
-    let user = await prisma.user.findUnique({ where: { phone } })
+    let user = await prisma.user.findFirst({ where: { phone } })
     let isNewUser = false
     if (!user) {
       const last4 = phone.slice(-4)
+      let username = `用户${last4}`
+      const conflict = await prisma.user.findUnique({ where: { username } })
+      if (conflict) username = `用户${last4}_${Date.now()}`
       user = await prisma.user.create({
-        data: { phone, username: `用户${last4}`, isNewUser: true },
+        data: { phone, username, isNewUser: true },
       })
       isNewUser = true
     }
@@ -59,7 +62,6 @@ export async function POST(req: NextRequest) {
     session.player1 = {
       id: user.id,
       username: user.username,
-      phone: user.phone,
       preferredLanguage: user.preferredLanguage as 'EN' | 'ZH',
     }
     await session.save()

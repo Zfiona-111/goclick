@@ -4,20 +4,18 @@ const prisma = new PrismaClient()
 
 async function main() {
   await prisma.user.upsert({
-    where: { phone: '10000000001' },
+    where: { username: 'TestPlayer1' },
     update: {},
     create: {
-      phone: '10000000001',
       username: 'TestPlayer1',
       preferredLanguage: 'EN',
     },
   })
 
   await prisma.user.upsert({
-    where: { phone: '10000000002' },
+    where: { username: 'TestPlayer2' },
     update: {},
     create: {
-      phone: '10000000002',
       username: 'TestPlayer2',
       preferredLanguage: 'ZH',
     },

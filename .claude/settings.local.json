@@ -11,7 +11,8 @@
       "Bash(ls:*)",
       "Bash(taskkill:*)",
       "Bash(wc:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(rm:*)"
     ]
   }
 }
