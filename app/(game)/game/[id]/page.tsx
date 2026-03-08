@@ -127,6 +127,8 @@ export default function GamePage() {
 
   // Info panel content (shared between sidebar and bottom sheet)
   function InfoPanel() {
+    const p1 = player1!
+    const p2 = player2!
     return (
       <>
         {/* Turn indicator */}
@@ -135,8 +137,7 @@ export default function GamePage() {
             {t('Current Turn', '当前回合')} · {t('Move', '第')} {gameState!.moveCount + 1}
           </div>
           <div className="space-y-2">
-            {([player1, player2] as const).map((p, i) => {
-              if (!p) return null
+            {([p1, p2] as const).map((p, i) => {
               const pNum = i + 1
               const isActive = currentTurn === pNum && !isFinished && !pendingMissionData
               const stoneColor = pNum === 1 ? 'bg-[#FFAEB9]' : 'bg-[#A2CD5A]'
@@ -176,21 +177,21 @@ export default function GamePage() {
 
         {/* Player cards */}
         <PlayerCard
-          username={player1.username}
-          phone={player1.phone}
-          gamesPlayed={player1.gamesPlayed}
-          wins={player1.wins}
-          preferredLanguage={player1.preferredLanguage as 'EN' | 'ZH'}
+          username={p1.username}
+          phone={p1.phone}
+          gamesPlayed={p1.gamesPlayed}
+          wins={p1.wins}
+          preferredLanguage={p1.preferredLanguage as 'EN' | 'ZH'}
           playerNumber={1}
           isActive={myPlayerNum === 1}
           label={t('Player 1 (Pink)', '玩家1（粉色）')}
         />
         <PlayerCard
-          username={player2.username}
-          phone={player2.phone}
-          gamesPlayed={player2.gamesPlayed}
-          wins={player2.wins}
-          preferredLanguage={player2.preferredLanguage as 'EN' | 'ZH'}
+          username={p2.username}
+          phone={p2.phone}
+          gamesPlayed={p2.gamesPlayed}
+          wins={p2.wins}
+          preferredLanguage={p2.preferredLanguage as 'EN' | 'ZH'}
           playerNumber={2}
           isActive={myPlayerNum === 2}
           label={t('Player 2 (Green)', '玩家2（绿色）')}
