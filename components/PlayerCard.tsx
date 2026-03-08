@@ -2,7 +2,7 @@
 
 interface PlayerCardProps {
   username: string
-  phone: string
+  phone?: string | null
   gamesPlayed: number
   wins: number
   preferredLanguage: 'EN' | 'ZH'

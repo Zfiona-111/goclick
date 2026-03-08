@@ -8,7 +8,7 @@ import LanguageToggle from '@/components/LanguageToggle'
 interface UserData {
   id: string
   username: string
-  phone: string
+  phone?: string | null
   preferredLanguage: 'EN' | 'ZH'
   gamesPlayed: number
   wins: number
